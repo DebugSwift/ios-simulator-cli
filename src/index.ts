@@ -939,10 +939,8 @@ async function cmdRun(configPath: string) {
   console.log(`Completed ${workflow.steps.length} step(s)`);
 }
 
-function printRunHelp() {
-  console.log(`ios-simulator-cli run --config <path>
-
-Run a JSON workflow file against the booted simulator.
+function runHelpBody(): string {
+  return `Run a JSON workflow file against the booted simulator.
 
 Config format:
 {
@@ -971,7 +969,14 @@ Supported step actions:
   ui-view           Capture compressed JPEG view
 
 Each step object must contain exactly one action key.
-Step payloads may include an optional "udid" to override the config-level udid.
+Step payloads may include an optional "udid" to override the config-level udid.`;
+}
+
+function printRunHelp() {
+  console.log(`ios-simulator-cli run --config <path>
+  ios-simulator-cli --config <path>
+
+${runHelpBody()}
 `);
 }
 
@@ -999,6 +1004,7 @@ Commands:
   install-app --app-path <path> [--udid <uuid>]
   launch-app --bundle-id <id> [--terminate-running] [--env KEY=VALUE] [--udid <uuid>]
   run --config <path>                    Run a JSON workflow file
+  --config <path>                        Shorthand for run --config
 
 Global options:
   -h, --help                            Show this help
@@ -1014,8 +1020,9 @@ Examples:
   ios-simulator-cli screenshot --output home.png
   ios-simulator-cli launch-app --bundle-id com.apple.mobilesafari
   ios-simulator-cli run --config flow.json
+  ios-simulator-cli --config flow.json
 
-Run ios-simulator-cli run --help for JSON workflow format.
+${runHelpBody()}
 `);
 }
 
@@ -1309,6 +1316,15 @@ async function main() {
         return;
       }
       await cmdRun(values.config);
+      return;
+    }
+    case "--config": {
+      const configPath = rest[0];
+      if (!configPath || configPath.startsWith("-")) {
+        printRunHelp();
+        return;
+      }
+      await cmdRun(configPath);
       return;
     }
     default:
