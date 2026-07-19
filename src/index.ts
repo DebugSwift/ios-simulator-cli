@@ -105,7 +105,51 @@ function getIdbPath(): string {
     return expandedPath;
   }
 
+  const pythonBins: string[] = [];
+  const pythonRoot = path.join(os.homedir(), "Library/Python");
+  if (fs.existsSync(pythonRoot)) {
+    for (const entry of fs.readdirSync(pythonRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      pythonBins.push(
+        path.join(pythonRoot, entry.name, "bin/idb")
+      );
+    }
+  }
+
+  const candidates = preferWorkingIdb([
+    path.join(os.homedir(), ".local/bin/idb"),
+    ...pythonBins,
+    "/opt/homebrew/bin/idb",
+    "/usr/local/bin/idb",
+  ].filter((candidate) => fs.existsSync(candidate)));
+
+  if (candidates.length > 0) {
+    return candidates[0];
+  }
+
   return "idb";
+}
+
+/** Prefer arm64-friendly idb installs (Xcode/system Python) over Intel Homebrew Python. */
+function preferWorkingIdb(candidates: string[]): string[] {
+  const score = (idbPath: string): number => {
+    try {
+      const shebang = fs.readFileSync(idbPath, "utf8").split("\n", 1)[0] ?? "";
+      if (shebang.includes("/usr/local/opt/python")) return 2;
+      if (
+        shebang.includes("Xcode.app") ||
+        shebang.includes("/usr/bin/python") ||
+        shebang.includes("/opt/homebrew/")
+      ) {
+        return 0;
+      }
+      return 1;
+    } catch {
+      return 1;
+    }
+  };
+
+  return [...candidates].sort((a, b) => score(a) - score(b));
 }
 
 async function idb(...args: string[]) {
@@ -209,6 +253,108 @@ function parseEnvPairs(values: string[] | undefined): Record<string, string> {
   }
   return env;
 }
+
+type UiElement = Record<string, unknown>;
+
+type FindElementOptions = {
+  search: string[];
+  type?: string;
+  matchMode: "substring" | "exact";
+  caseSensitive: boolean;
+};
+
+function matchesSearch(
+  value: string | null,
+  term: string,
+  mode: "substring" | "exact",
+  sensitive: boolean
+): boolean {
+  if (value == null) return false;
+  const v = sensitive ? value : value.toLowerCase();
+  const t = sensitive ? term : term.toLowerCase();
+  return mode === "exact" ? v === t : v.includes(t);
+}
+
+function findUiElements(
+  elements: UiElement[],
+  options: FindElementOptions
+): UiElement[] {
+  const results: UiElement[] = [];
+
+  for (const element of elements) {
+    const label = element.AXLabel as string | null;
+    const uniqueId = element.AXUniqueId as string | null;
+    const elementType = element.type as string | undefined;
+
+    const matchesAnySearch = options.search.some(
+      (term) =>
+        matchesSearch(label, term, options.matchMode, options.caseSensitive) ||
+        matchesSearch(uniqueId, term, options.matchMode, options.caseSensitive)
+    );
+
+    const matchesType =
+      options.type == null ||
+      (elementType != null &&
+        elementType.toLowerCase() === options.type.toLowerCase());
+
+    if (matchesAnySearch && matchesType) {
+      results.push(element);
+    }
+
+    const children = element.children as UiElement[] | undefined;
+    if (children && children.length > 0) {
+      results.push(...findUiElements(children, options));
+    }
+  }
+
+  return results;
+}
+
+async function fetchUiTree(udid?: string): Promise<UiElement[]> {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(udid));
+  const { stdout } = await idb(
+    "ui",
+    "describe-all",
+    "--udid",
+    actualUdid,
+    "--json",
+    "--nested"
+  );
+
+  return JSON.parse(stdout) as UiElement[];
+}
+
+function elementCenter(element: UiElement): { x: number; y: number } {
+  const frame = element.frame as
+    | { x?: unknown; y?: unknown; width?: unknown; height?: unknown }
+    | undefined;
+
+  if (
+    !frame ||
+    typeof frame.x !== "number" ||
+    typeof frame.y !== "number" ||
+    typeof frame.width !== "number" ||
+    typeof frame.height !== "number"
+  ) {
+    throw new Error("Element has no valid frame for tapping");
+  }
+
+  return {
+    x: Math.round(frame.x + frame.width / 2),
+    y: Math.round(frame.y + frame.height / 2),
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const matchModeSchema = z.enum(["substring", "exact"]);
+
+const workflowSchema = z.object({
+  udid: udidSchema,
+  steps: z.array(z.record(z.unknown())).min(1),
+});
 
 async function cmdGetBootedSimId() {
   const { id, name } = await getBootedDevice();
@@ -329,72 +475,8 @@ async function cmdUiFindElement(options: {
   matchMode: "substring" | "exact";
   caseSensitive: boolean;
 }) {
-  const actualUdid = await getBootedDeviceId(udidSchema.parse(options.udid));
-  const { stdout } = await idb(
-    "ui",
-    "describe-all",
-    "--udid",
-    actualUdid,
-    "--json",
-    "--nested"
-  );
-
-  const uiData = JSON.parse(stdout);
-
-  function matchesSearch(
-    value: string | null,
-    term: string,
-    mode: "substring" | "exact",
-    sensitive: boolean
-  ): boolean {
-    if (value == null) return false;
-    const v = sensitive ? value : value.toLowerCase();
-    const t = sensitive ? term : term.toLowerCase();
-    return mode === "exact" ? v === t : v.includes(t);
-  }
-
-  function findElements(
-    elements: Array<Record<string, unknown>>
-  ): Array<Record<string, unknown>> {
-    const results: Array<Record<string, unknown>> = [];
-
-    for (const element of elements) {
-      const label = element.AXLabel as string | null;
-      const uniqueId = element.AXUniqueId as string | null;
-      const elementType = element.type as string | undefined;
-
-      const matchesAnySearch = options.search.some(
-        (term) =>
-          matchesSearch(label, term, options.matchMode, options.caseSensitive) ||
-          matchesSearch(
-            uniqueId,
-            term,
-            options.matchMode,
-            options.caseSensitive
-          )
-      );
-
-      const matchesType =
-        options.type == null ||
-        (elementType != null &&
-          elementType.toLowerCase() === options.type.toLowerCase());
-
-      if (matchesAnySearch && matchesType) {
-        results.push(element);
-      }
-
-      const children = element.children as
-        | Array<Record<string, unknown>>
-        | undefined;
-      if (children && children.length > 0) {
-        results.push(...findElements(children));
-      }
-    }
-
-    return results;
-  }
-
-  console.log(JSON.stringify(findElements(uiData)));
+  const uiData = await fetchUiTree(options.udid);
+  console.log(JSON.stringify(findUiElements(uiData, options)));
 }
 
 async function cmdUiView(options: { udid?: string; output?: string }) {
@@ -631,6 +713,268 @@ async function cmdLaunchApp(options: {
   );
 }
 
+function stepUdid(
+  globalUdid: string | undefined,
+  step: Record<string, unknown>
+): string | undefined {
+  const value = step.udid;
+  if (value == null) return globalUdid;
+  return udidSchema.parse(value);
+}
+
+function parseStepObject(step: unknown, index: number): Record<string, unknown> {
+  if (typeof step !== "object" || step == null || Array.isArray(step)) {
+    throw new Error(`Step ${index + 1}: expected an object`);
+  }
+
+  const keys = Object.keys(step);
+  if (keys.length !== 1) {
+    throw new Error(
+      `Step ${index + 1}: expected exactly one action, got: ${keys.join(", ") || "(empty)"}`
+    );
+  }
+
+  return step as Record<string, unknown>;
+}
+
+async function runWorkflowStep(
+  action: string,
+  payload: unknown,
+  globalUdid: string | undefined,
+  index: number
+) {
+  const stepLabel = `Step ${index + 1}: ${action}`;
+  console.log(stepLabel);
+
+  switch (action) {
+    case "wait": {
+      const ms = z.number().int().nonnegative().parse(payload);
+      await sleep(ms);
+      return;
+    }
+    case "open": {
+      if (payload != null && payload !== true) {
+        throw new Error(`${stepLabel} expects true or no value`);
+      }
+      await cmdOpenSimulator();
+      return;
+    }
+    case "launch-app": {
+      const step = z
+        .object({
+          bundleId: z.string().min(1),
+          terminateRunning: z.boolean().optional(),
+          env: z.record(z.string()).optional(),
+          udid: udidSchema,
+        })
+        .parse(payload);
+      await cmdLaunchApp({
+        udid: stepUdid(globalUdid, step),
+        bundleId: step.bundleId,
+        terminateRunning: step.terminateRunning,
+        env: step.env,
+      });
+      return;
+    }
+    case "install-app": {
+      const step = z
+        .object({
+          appPath: z.string().min(1),
+          udid: udidSchema,
+        })
+        .parse(payload);
+      await cmdInstallApp(step.appPath, stepUdid(globalUdid, step));
+      return;
+    }
+    case "tap": {
+      const step = z
+        .object({
+          x: z.number().optional(),
+          y: z.number().optional(),
+          search: z.union([z.string(), z.array(z.string())]).optional(),
+          type: z.string().optional(),
+          matchMode: matchModeSchema.optional(),
+          caseSensitive: z.boolean().optional(),
+          index: z.number().int().nonnegative().optional(),
+          duration: z.string().regex(/^\d+(\.\d+)?$/).optional(),
+          udid: udidSchema,
+        })
+        .parse(payload);
+      const udid = stepUdid(globalUdid, step);
+
+      if (step.x != null && step.y != null) {
+        await cmdUiTap({
+          udid,
+          x: step.x,
+          y: step.y,
+          duration: step.duration,
+        });
+        return;
+      }
+
+      if (step.search == null) {
+        throw new Error(`${stepLabel} requires x/y or search`);
+      }
+
+      const search = Array.isArray(step.search) ? step.search : [step.search];
+      const matches = findUiElements(await fetchUiTree(udid), {
+        search,
+        type: step.type,
+        matchMode: step.matchMode ?? "substring",
+        caseSensitive: step.caseSensitive ?? false,
+      });
+
+      const matchIndex = step.index ?? 0;
+      if (matches.length === 0) {
+        throw new Error(
+          `${stepLabel} found no element matching: ${search.join(", ")}`
+        );
+      }
+      if (matchIndex >= matches.length) {
+        throw new Error(
+          `${stepLabel} index ${matchIndex} out of range (${matches.length} matches)`
+        );
+      }
+
+      const { x, y } = elementCenter(matches[matchIndex]);
+      await cmdUiTap({ udid, x, y, duration: step.duration });
+      return;
+    }
+    case "type": {
+      const step = z
+        .object({
+          text: z.string().min(1).max(500).regex(/^[\x20-\x7E]+$/),
+          udid: udidSchema,
+        })
+        .parse(payload);
+      await cmdUiType(step.text, stepUdid(globalUdid, step));
+      return;
+    }
+    case "swipe": {
+      const step = z
+        .object({
+          xStart: z.number(),
+          yStart: z.number(),
+          xEnd: z.number(),
+          yEnd: z.number(),
+          duration: z.string().regex(/^\d+(\.\d+)?$/).optional(),
+          delta: z.number().optional(),
+          udid: udidSchema,
+        })
+        .parse(payload);
+      await cmdUiSwipe({
+        udid: stepUdid(globalUdid, step),
+        xStart: step.xStart,
+        yStart: step.yStart,
+        xEnd: step.xEnd,
+        yEnd: step.yEnd,
+        duration: step.duration,
+        delta: step.delta,
+      });
+      return;
+    }
+    case "screenshot": {
+      const step = z
+        .object({
+          output: z.string().min(1),
+          type: z.enum(["png", "tiff", "bmp", "gif", "jpeg"]).optional(),
+          display: z.enum(["internal", "external"]).optional(),
+          mask: z.enum(["ignored", "alpha", "black"]).optional(),
+          udid: udidSchema,
+        })
+        .parse(payload);
+      await cmdScreenshot({
+        udid: stepUdid(globalUdid, step),
+        outputPath: step.output,
+        type: step.type,
+        display: step.display,
+        mask: step.mask,
+      });
+      return;
+    }
+    case "ui-view": {
+      const step = z
+        .object({
+          output: z.string().optional(),
+          udid: udidSchema,
+        })
+        .parse(payload);
+      await cmdUiView({
+        udid: stepUdid(globalUdid, step),
+        output: step.output,
+      });
+      return;
+    }
+    default:
+      throw new Error(
+        `${stepLabel} uses unknown action "${action}". Run ios-simulator-cli run --help for supported actions.`
+      );
+  }
+}
+
+async function cmdRun(configPath: string) {
+  const absolutePath = path.isAbsolute(configPath)
+    ? configPath
+    : path.resolve(configPath);
+
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error(`Config file not found: ${absolutePath}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(absolutePath, "utf8"));
+  } catch {
+    throw new Error(`Invalid JSON in config file: ${absolutePath}`);
+  }
+
+  const workflow = workflowSchema.parse(parsed);
+
+  for (let i = 0; i < workflow.steps.length; i++) {
+    const step = parseStepObject(workflow.steps[i], i);
+    const [action, payload] = Object.entries(step)[0];
+    await runWorkflowStep(action, payload, workflow.udid, i);
+  }
+
+  console.log(`Completed ${workflow.steps.length} step(s)`);
+}
+
+function printRunHelp() {
+  console.log(`ios-simulator-cli run --config <path>
+
+Run a JSON workflow file against the booted simulator.
+
+Config format:
+{
+  "udid": "<optional-simulator-uuid>",
+  "steps": [
+    { "open": true },
+    { "wait": 1000 },
+    { "launch-app": { "bundleId": "com.example.app", "terminateRunning": true } },
+    { "tap": { "search": "Sign In", "type": "Button" } },
+    { "tap": { "x": 200, "y": 400 } },
+    { "type": { "text": "hello@world.com" } },
+    { "swipe": { "xStart": 200, "yStart": 600, "xEnd": 200, "yEnd": 200 } },
+    { "screenshot": { "output": "result.png" } }
+  ]
+}
+
+Supported step actions:
+  wait              Milliseconds to pause (number)
+  open              Open Simulator.app (true)
+  launch-app        Launch app by bundle ID
+  install-app       Install .app or .ipa
+  tap               Tap by x/y or by accessibility search label
+  type              Type ASCII text
+  swipe             Swipe gesture
+  screenshot        Save screenshot to file
+  ui-view           Capture compressed JPEG view
+
+Each step object must contain exactly one action key.
+Step payloads may include an optional "udid" to override the config-level udid.
+`);
+}
+
 function printHelp() {
   console.log(`ios-simulator-cli v${VERSION}
 
@@ -654,6 +998,7 @@ Commands:
   stop-recording                        Stop an active simulator recording
   install-app --app-path <path> [--udid <uuid>]
   launch-app --bundle-id <id> [--terminate-running] [--env KEY=VALUE] [--udid <uuid>]
+  run --config <path>                    Run a JSON workflow file
 
 Global options:
   -h, --help                            Show this help
@@ -668,6 +1013,9 @@ Examples:
   ios-simulator-cli ui tap --x 200 --y 400
   ios-simulator-cli screenshot --output home.png
   ios-simulator-cli launch-app --bundle-id com.apple.mobilesafari
+  ios-simulator-cli run --config flow.json
+
+Run ios-simulator-cli run --help for JSON workflow format.
 `);
 }
 
@@ -822,7 +1170,16 @@ async function handleUiCommand(args: string[]) {
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+  if (args.length === 0) {
+    printHelp();
+    return;
+  }
+
+  if (args.includes("--help") || args.includes("-h")) {
+    if (args[0] === "run") {
+      printRunHelp();
+      return;
+    }
     printHelp();
     return;
   }
@@ -933,6 +1290,24 @@ async function main() {
         terminateRunning: values["terminate-running"],
         env: parseEnvPairs(values.env),
       });
+      return;
+    }
+    case "run": {
+      if (rest.includes("--help") || rest.includes("-h")) {
+        printRunHelp();
+        return;
+      }
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          config: { type: "string" },
+        },
+        allowPositionals: false,
+      });
+      if (!values.config) {
+        throw new Error("run requires --config <path>");
+      }
+      await cmdRun(values.config);
       return;
     }
     default:
