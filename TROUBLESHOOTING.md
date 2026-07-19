@@ -71,8 +71,14 @@ The installation section in [IDB](https://fbidb.io/docs/installation/) is a litt
 
 ### "idb: command not found" or IDB errors
 - Follow the install steps above for Homebrew + pip or asdf.
-- Ensure `idb` is in your PATH: try running `idb --version` in your terminal.
+- Ensure `idb` is in your PATH: try running `idb -h` in your terminal.
 - Set a custom path with `IOS_SIMULATOR_CLI_IDB_PATH` if needed.
+- On Apple Silicon Macs, install `fb-idb` with the **system/Xcode Python** (arm64), not Intel Homebrew Python:
+  ```sh
+  /usr/bin/python3 -m pip install --user fb-idb
+  export IOS_SIMULATOR_CLI_IDB_PATH="$HOME/Library/Python/3.9/bin/idb"
+  ```
+- If you see `spawn idb EACCES` or `CoreSimulator couldn't be loaded because it doesn't contain a version for the current architecture`, your `idb` is likely using an x86_64 Python while `idb_companion` needs arm64. Reinstall `fb-idb` with `/usr/bin/python3` as shown above.
 
 ### Permission or File Errors
 - Ensure you have permission to write to the output path (e.g., for screenshots or recordings).

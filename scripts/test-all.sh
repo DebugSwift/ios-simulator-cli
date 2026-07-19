@@ -64,8 +64,7 @@ fi
 check launch-app-env cli launch-app --bundle-id com.apple.mobilesafari --env TEST=1
 check unknown-fails bash -c '! cli badcmd 2>/dev/null'
 
-if [[ -n "${IOS_SIMULATOR_CLI_IDB_PATH:-}" ]] && [[ -x "${IOS_SIMULATOR_CLI_IDB_PATH}" ]]; then
-  export PATH="/usr/local/Cellar/idb-companion/1.1.8/bin:${PATH:-}"
+if cli ui describe-all >/dev/null 2>&1; then
   check ui-describe-all cli ui describe-all
   check ui-find-element bash -c 'cli ui find-element --search Safari --type Button | head -c 80 >/dev/null'
   check ui-tap cli ui tap --x 200 --y 200
@@ -73,12 +72,12 @@ if [[ -n "${IOS_SIMULATOR_CLI_IDB_PATH:-}" ]] && [[ -x "${IOS_SIMULATOR_CLI_IDB_
   check ui-swipe cli ui swipe --x-start 200 --y-start 500 --x-end 200 --y-end 200
   check ui-view cli ui view --output "$OUT/view.jpg"
 else
-  skip ui-describe-all "IOS_SIMULATOR_CLI_IDB_PATH not set"
-  skip ui-find-element "IOS_SIMULATOR_CLI_IDB_PATH not set"
-  skip ui-tap "IOS_SIMULATOR_CLI_IDB_PATH not set"
-  skip ui-type "IOS_SIMULATOR_CLI_IDB_PATH not set"
-  skip ui-swipe "IOS_SIMULATOR_CLI_IDB_PATH not set"
-  skip ui-view "IOS_SIMULATOR_CLI_IDB_PATH not set"
+  skip ui-describe-all "idb UI unavailable (see TROUBLESHOOTING.md)"
+  skip ui-find-element "idb UI unavailable (see TROUBLESHOOTING.md)"
+  skip ui-tap "idb UI unavailable (see TROUBLESHOOTING.md)"
+  skip ui-type "idb UI unavailable (see TROUBLESHOOTING.md)"
+  skip ui-swipe "idb UI unavailable (see TROUBLESHOOTING.md)"
+  skip ui-view "idb UI unavailable (see TROUBLESHOOTING.md)"
 fi
 
 if [[ -n "${TEST_APP_PATH:-}" ]] && [[ -e "${TEST_APP_PATH}" ]]; then
