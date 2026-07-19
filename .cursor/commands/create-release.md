@@ -19,7 +19,7 @@ Create a GitHub release based on commits since the previous tag. Generate releas
 2. **Format Release Notes:**
    Take the raw git diff and format it into Markdown using this structure:
    ```markdown
-   # iOS Simulator MCP <NEW_VERSION>
+   # iOS Simulator CLI <NEW_VERSION>
 
    ## Features 
    - **Feature Name:** Description...

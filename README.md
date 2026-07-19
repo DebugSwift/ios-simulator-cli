@@ -1,500 +1,123 @@
-# iOS Simulator MCP Server
+# iOS Simulator CLI
 
-[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=ios-simulator&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImlvcy1zaW11bGF0b3ItbWNwIl19) [![NPM Version](https://img.shields.io/npm/v/ios-simulator-mcp)](https://www.npmjs.com/package/ios-simulator-mcp)
+[![NPM Version](https://img.shields.io/npm/v/ios-simulator-cli)](https://www.npmjs.com/package/ios-simulator-cli)
 
-A Model Context Protocol (MCP) server for interacting with iOS simulators. This server allows you to interact with iOS simulators by getting information about them, controlling UI interactions, and inspecting UI elements.
+A command-line tool for interacting with iOS simulators. Control UI, capture screenshots and video, install apps, and inspect accessibility elements from your terminal or automation scripts.
 
 > **Security Notice**: Command injection vulnerabilities present in versions < 1.3.3 have been fixed. Please update to v1.3.3 or later. See [SECURITY.md](SECURITY.md) for details.
 
-https://github.com/user-attachments/assets/453ebe7b-cc93-4ac2-b08d-0f8ac8339ad3
+## Installation
 
-## 🌟 Featured In
+### Homebrew (recommended)
 
-This project has been featured and mentioned in various publications and resources:
-
-- [Claude Code Best Practices article](https://www.anthropic.com/engineering/claude-code-best-practices#:~:text=Write%20code%2C%20screenshot%20result%2C%20iterate) - Anthropic's engineering blog showcasing best practices
-- [React Native Newsletter Issue 187](https://us3.campaign-archive.com/?u=78d9e37a94fa0b522939163d4&id=656ed2c2cf#:~:text=iOS%20Simulator%20MCP%20Server) - Featured in the most popular React Native community newsletter
-- [Mobile Automation Newsletter - #56](https://testableapple.com/newsletter/56/#:~:text=iOS-,iOS%20Simulator%20MCP,-%F0%9F%8E%99%EF%B8%8F%20Joshua%20Yoes) - Featured a long running newsletter about mobile testing and automation resources
-- [punkeye/awesome-mcp-server listing](https://github.com/punkpeye/awesome-mcp-servers) - Listed in one of the most popular curated awesome MCP servers collection
-
-## Tools
-
-### `get_booted_sim_id`
-
-**Description:** Get the ID of the currently booted iOS simulator
-
-**Parameters:** No Parameters
-
-### `open_simulator`
-
-**Description:** Opens the iOS Simulator application
-
-**Parameters:** No Parameters
-
-### `ui_describe_all`
-
-**Description:** Describes accessibility information for the entire screen in the iOS Simulator
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-}
+```bash
+brew install DebugSwift/ios-simulator-cli/ios-simulator-cli
 ```
 
-### `ui_tap`
+To install the latest from `main`:
 
-**Description:** Tap on the screen in the iOS Simulator
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Press duration in seconds (decimal numbers allowed)
-   */
-  duration?: string;
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-  /** The x-coordinate */
-  x: number;
-  /** The y-coordinate */
-  y: number;
-}
+```bash
+brew install --HEAD DebugSwift/ios-simulator-cli/ios-simulator-cli
 ```
 
-### `ui_type`
+### npm
 
-**Description:** Input text into the iOS Simulator
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-  /**
-   * Text to input
-   * Format: ASCII printable characters only
-   */
-  text: string;
-}
+```bash
+npm install -g ios-simulator-cli
 ```
 
-### `ui_swipe`
+### From source
 
-**Description:** Swipe on the screen in the iOS Simulator
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Swipe duration in seconds (decimal numbers allowed)
-   */
-  duration?: string;
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-  /** The starting x-coordinate */
-  x_start: number;
-  /** The starting y-coordinate */
-  y_start: number;
-  /** The ending x-coordinate */
-  x_end: number;
-  /** The ending y-coordinate */
-  y_end: number;
-  /** The size of each step in the swipe (default is 1) */
-  delta?: number;
-}
+```bash
+git clone https://github.com/DebugSwift/ios-simulator-cli
+cd ios-simulator-cli
+npm install
+npm run build
+npm link
 ```
-
-### `ui_describe_point`
-
-**Description:** Returns the accessibility element at given co-ordinates on the iOS Simulator's screen
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-  /** The x-coordinate */
-  x: number;
-  /** The y-coordinate */
-  y: number;
-}
-```
-
-### `ui_find_element`
-
-**Description:** Searches the accessibility tree and returns elements matching the given criteria
-
-**Parameters:**
-
-```typescript
-{
-  /** Array of search strings. An element matches if ANY string matches against its AXLabel or AXUniqueId */
-  search: string[];
-  /** Filter by element type (e.g. 'Button', 'StaticText', 'Group'). Case-insensitive exact match */
-  type?: string;
-  /** Match mode: 'substring' (default) or 'exact' */
-  matchMode?: "substring" | "exact";
-  /** Whether search matching is case-sensitive (default: false) */
-  caseSensitive?: boolean;
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-}
-```
-
-### `ui_view`
-
-**Description:** Get the image content of a compressed screenshot of the current simulator view
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-}
-```
-
-### `screenshot`
-
-**Description:** Takes a screenshot of the iOS Simulator
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-  /** File path where the screenshot will be saved. If relative, it uses the directory specified by the `IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR` env var, or `~/Downloads` if not set. */
-  output_path: string;
-  /** Image format (png, tiff, bmp, gif, or jpeg). Default is png. */
-  type?: "png" | "tiff" | "bmp" | "gif" | "jpeg";
-  /** Display to capture (internal or external). Default depends on device type. */
-  display?: "internal" | "external";
-  /** For non-rectangular displays, handle the mask by policy (ignored, alpha, or black) */
-  mask?: "ignored" | "alpha" | "black";
-}
-```
-
-### `record_video`
-
-**Description:** Records a video of the iOS Simulator using simctl directly
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-  /** Optional output path. If not provided, a default name will be used. The file will be saved in the directory specified by `IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR` or in `~/Downloads` if the environment variable is not set. */
-  output_path?: string;
-  /** Specifies the codec type: "h264" or "hevc". Default is "hevc". */
-  codec?: "h264" | "hevc";
-  /** Display to capture: "internal" or "external". Default depends on device type. */
-  display?: "internal" | "external";
-  /** For non-rectangular displays, handle the mask by policy: "ignored", "alpha", or "black". */
-  mask?: "ignored" | "alpha" | "black";
-  /** Force the output file to be written to, even if the file already exists. */
-  force?: boolean;
-}
-```
-
-### `stop_recording`
-
-**Description:** Stops the simulator video recording using killall
-
-**Parameters:** No Parameters
-
-### `install_app`
-
-**Description:** Installs an app bundle (.app or .ipa) on the iOS Simulator
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-  /** Path to the app bundle (.app directory or .ipa file) to install */
-  app_path: string;
-}
-```
-
-### `launch_app`
-
-**Description:** Launches an app on the iOS Simulator by bundle identifier
-
-**Parameters:**
-
-```typescript
-{
-  /**
-   * Udid of target, can also be set with the IDB_UDID env var
-   * Format: UUID (8-4-4-4-12 hexadecimal characters)
-   */
-  udid?: string;
-  /** Bundle identifier of the app to launch (e.g., com.apple.mobilesafari) */
-  bundle_id: string;
-  /** Terminate the app if it is already running before launching */
-  terminate_running?: boolean;
-  /** Optional environment variables passed via SIMCTL_CHILD_ to simctl launch */
-  env?: Record<string, string>;
-}
-```
-
-**Notes:** Environment variables are passed using `SIMCTL_CHILD_` because `simctl launch` does not support `--env/--envs` on all Xcode versions.
-
-**Example:**
-
-```json
-{
-  "bundle_id": "com.example.app",
-  "terminate_running": true,
-  "env": {
-    "FOO": "bar",
-    "BAZ": "qux"
-  }
-}
-```
-
-## 💡 Use Case: QA Step via MCP Tool Calls
-
-This MCP server allows AI assistants integrated with a Model Context Protocol (MCP) client to perform Quality Assurance tasks by making tool calls. This is useful immediately after implementing features to help ensure UI consistency and correct behavior.
-
-### How to Use
-
-After a feature implementation, instruct your AI assistant within its MCP client environment to use the available tools. For example, in Cursor's agent mode, you could use the prompts below to quickly validate and document UI interactions.
-
-### Example Prompts
-
-- **Verify UI Elements:**
-
-  ```
-  Verify all accessibility elements on the current screen
-  ```
-
-- **Confirm Text Input:**
-
-  ```
-  Enter "QA Test" into the text input field and confirm the input is correct
-  ```
-
-- **Check Tap Response:**
-
-  ```
-  Tap on coordinates x=250, y=400 and verify the expected element is triggered
-  ```
-
-- **Validate Swipe Action:**
-
-  ```
-  Swipe from x=150, y=600 to x=150, y=100 and confirm correct behavior
-  ```
-
-- **Detailed Element Check:**
-
-  ```
-  Describe the UI element at position x=300, y=350 to ensure proper labeling and functionality
-  ```
-
-- **Show Your AI Agent the Simulator Screen:**
-
-  ```
-  View the current simulator screen
-  ```
-
-- **Take Screenshot:**
-
-  ```
-  Take a screenshot of the current simulator screen and save it to my_screenshot.png
-  ```
-
-- **Record Video:**
-
-  ```
-  Start recording a video of the simulator screen (saves to the default output directory, which is `~/Downloads` unless overridden by `IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR`)
-  ```
-
-- **Stop Recording:**
-
-  ```
-  Stop the current simulator screen recording
-  ```
-
-- **Install App:**
-
-  ```
-  Install the app at path/to/MyApp.app on the simulator
-  ```
-
-- **Launch App:**
-  ```
-  Launch the Safari app (com.apple.mobilesafari) on the simulator
-  ```
 
 ## Prerequisites
 
-- Node.js
-- macOS (as iOS simulators are only available on macOS)
+- macOS (iOS simulators are only available on macOS)
 - [Xcode](https://developer.apple.com/xcode/resources/) and iOS simulators installed
-- Facebook [IDB](https://fbidb.io/) tool [(see install guide)](https://fbidb.io/docs/installation)
+- Facebook [IDB](https://fbidb.io/) tool ([install guide](https://fbidb.io/docs/installation))
 
-## Installation
+## Usage
 
-This section provides instructions for integrating the iOS Simulator MCP server with different Model Context Protocol (MCP) clients.
+```bash
+ios-simulator-cli --help
+ios-simulator-cli --version
+```
 
-### Installation with Cursor
+### Commands
 
-Cursor manages MCP servers through its configuration file located at `~/.cursor/mcp.json`.
+| Command | Description |
+| --- | --- |
+| `get-booted-sim-id` | Get the booted simulator UUID |
+| `open` | Open Simulator.app |
+| `ui describe-all` | Describe all UI accessibility elements |
+| `ui tap` | Tap at coordinates |
+| `ui type` | Input text |
+| `ui swipe` | Swipe gesture |
+| `ui describe-point` | Get element at coordinates |
+| `ui find-element` | Search accessibility tree |
+| `ui view` | Capture compressed screenshot (JPEG base64 or file) |
+| `screenshot` | Save screenshot to file |
+| `record-video` | Start video recording |
+| `stop-recording` | Stop video recording |
+| `install-app` | Install an app bundle (.app or .ipa) |
+| `launch-app` | Launch an app by bundle identifier |
 
-#### Option 1: Using NPX (Recommended)
+### Examples
 
-1.  Edit your Cursor MCP configuration file. You can often open it directly from Cursor or use a command like:
-    ```bash
-    # Open with your default editor (or use 'code', 'vim', etc.)
-    open ~/.cursor/mcp.json
-    # Or use Cursor's command if available
-    # cursor ~/.cursor/mcp.json
-    ```
-2.  Add or update the `mcpServers` section with the iOS simulator server configuration:
-    ```json
-    {
-      "mcpServers": {
-        // ... other servers might be listed here ...
-        "ios-simulator": {
-          "command": "npx",
-          "args": ["-y", "ios-simulator-mcp"]
-        }
-      }
-    }
-    ```
-    Ensure the JSON structure is valid, especially if `mcpServers` already exists.
-3.  Restart Cursor for the changes to take effect.
+```bash
+# Get the booted simulator
+ios-simulator-cli get-booted-sim-id
 
-#### Option 2: Local Development
+# Open Simulator.app
+ios-simulator-cli open
 
-1.  Clone this repository:
-    ```bash
-    git clone https://github.com/joshuayoes/ios-simulator-mcp
-    cd ios-simulator-mcp
-    ```
-2.  Install dependencies:
-    ```bash
-    npm install
-    ```
-3.  Build the project:
-    ```bash
-    npm run build
-    ```
-4.  Edit your Cursor MCP configuration file (as shown in Option 1).
-5.  Add or update the `mcpServers` section, pointing to your local build:
-    ```json
-    {
-      "mcpServers": {
-        // ... other servers might be listed here ...
-        "ios-simulator": {
-          "command": "node",
-          "args": ["/full/path/to/your/ios-simulator-mcp/build/index.js"]
-        }
-      }
-    }
-    ```
-    **Important:** Replace `/full/path/to/your/` with the absolute path to where you cloned the `ios-simulator-mcp` repository.
-6.  Restart Cursor for the changes to take effect.
+# Describe the current screen
+ios-simulator-cli ui describe-all
 
-### Installation with Claude Code
+# Tap at coordinates
+ios-simulator-cli ui tap --x 200 --y 400
 
-Claude Code CLI can manage MCP servers using the `claude mcp` commands or by editing its configuration files directly. For more details on Claude Code MCP configuration, refer to the [official documentation](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/tutorials#set-up-model-context-protocol-mcp).
+# Type text
+ios-simulator-cli ui type "Hello World"
 
-#### Option 1: Using NPX (Recommended)
+# Swipe down
+ios-simulator-cli ui swipe --x-start 200 --y-start 600 --x-end 200 --y-end 200
 
-1.  Add the server using the `claude mcp add` command:
-    ```bash
-    claude mcp add ios-simulator npx ios-simulator-mcp
-    ```
-2.  Restart any running Claude Code sessions if necessary.
+# Find a button by label
+ios-simulator-cli ui find-element --search "Search" --type Button
 
-#### Option 2: Local Development
+# Save a screenshot
+ios-simulator-cli screenshot --output home.png
 
-1.  Clone this repository, install dependencies, and build the project as described in the Cursor "Local Development" steps 1-3.
-2.  Add the server using the `claude mcp add` command, pointing to your local build:
-    ```bash
-    claude mcp add ios-simulator -- node "/full/path/to/your/ios-simulator-mcp/build/index.js"
-    ```
-    **Important:** Replace `/full/path/to/your/` with the absolute path to where you cloned the `ios-simulator-mcp` repository.
-3.  Restart any running Claude Code sessions if necessary.
+# Capture a compressed view to a file
+ios-simulator-cli ui view --output screen.jpg
+
+# Start and stop recording
+ios-simulator-cli record-video --output demo.mp4
+ios-simulator-cli stop-recording
+
+# Install and launch an app
+ios-simulator-cli install-app --app-path ./MyApp.app
+ios-simulator-cli launch-app --bundle-id com.apple.mobilesafari --terminate-running
+ios-simulator-cli launch-app --bundle-id com.example.app --env FOO=bar --env BAZ=qux
+```
 
 ## Configuration
 
 ### Environment Variables
 
-| Variable                               | Description                                                                                                                                                                                          | Example                                  |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `IOS_SIMULATOR_MCP_FILTERED_TOOLS`     | A comma-separated list of tool names to filter out from being registered.                                                                                                                            | `screenshot,record_video,stop_recording` |
-| `IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR` | Specifies a default directory for output files like screenshots and video recordings. If not set, `~/Downloads` will be used. This can be handy if your agent has limited access to the file system. | `~/Code/awesome-project/tmp`             |
-| `IOS_SIMULATOR_MCP_IDB_PATH`           | Specifies a custom path to the IDB executable. If not set, `idb` will be used (assuming it's in your PATH). Useful if IDB is installed in a non-standard location.                                   | `~/bin/idb` or `/usr/local/bin/idb`      |
+| Variable | Description | Example |
+| --- | --- | --- |
+| `IOS_SIMULATOR_CLI_DEFAULT_OUTPUT_DIR` | Default directory for relative output paths (screenshots, recordings). Defaults to `~/Downloads`. | `~/Code/project/tmp` |
+| `IOS_SIMULATOR_CLI_IDB_PATH` | Custom path to the IDB executable. Defaults to `idb` on PATH. | `~/bin/idb` |
 
-#### Configuration Example
-
-```json
-{
-  "mcpServers": {
-    "ios-simulator": {
-      "command": "npx",
-      "args": ["-y", "ios-simulator-mcp"],
-      "env": {
-        "IOS_SIMULATOR_MCP_FILTERED_TOOLS": "screenshot,record_video,stop_recording",
-        "IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR": "~/Code/awesome-project/tmp",
-        "IOS_SIMULATOR_MCP_IDB_PATH": "~/bin/idb"
-      }
-    }
-  }
-}
-```
-
-## MCP Registry Server Listings
-
-<a href="https://glama.ai/mcp/servers/@joshuayoes/ios-simulator-mcp">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@joshuayoes/ios-simulator-mcp/badge" alt="iOS Simulator MCP server" />
-</a>
-
-[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/joshuayoes-ios-simulator-mcp-badge.png)](https://mseep.ai/app/joshuayoes-ios-simulator-mcp)
+Legacy `IOS_SIMULATOR_MCP_*` environment variables are still supported for output directory and IDB path.
 
 ## License
 

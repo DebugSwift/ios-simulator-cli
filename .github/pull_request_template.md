@@ -7,8 +7,8 @@
 <!--
 Example:
 1. Start iOS simulator: `xcrun simctl boot "iPhone 15"`
-2. Configure MCP client to use local build
-3. Test functionality: "Ask AI to tap coordinates (100, 200)"
+2. Build and run: `npm run build && node build/index.js get-booted-sim-id`
+3. Test functionality: `node build/index.js ui tap --x 100 --y 200`
 4. Verify expected behavior
 5. Include screenshots/video if possible
 -->
@@ -16,5 +16,5 @@ Example:
 ## Checklist
 
 - [ ] I have read and followed the [Contributing Guide](CONTRIBUTING.md)
-- [ ] I have manually tested this with a real iOS simulator and MCP client
-- [ ] Updated README.md if adding new tools
+- [ ] I have manually tested this with a real iOS simulator
+- [ ] Updated README.md if adding new commands

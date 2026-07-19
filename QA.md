@@ -1,27 +1,27 @@
 # Quality Assurance
 
-This guide contains manual quality assurance tests to make sure all the tools in this MCP server is functional on release.
+This guide contains manual quality assurance tests to make sure all commands are functional on release.
 
-You can run a test case copy and pasting the test case into a chat in an MCP client (like Cursor) that can run MCP tools.
+Run each step from your terminal with a booted iOS simulator.
 
 ## Test Case: Photos app
 
 **Note:** This test case was written using iOS 17.2 and the native Photos app. It may need to be adjusted for other iOS versions or Photos app changes.
 
-1. Have the user open the native Photo app in the iOS simulator.
-2. Call `get_booted_sim_id` to get the UDID of the booted simulator.
-3. Call `record_video` to start recording a screen recording of the test.
-4. Call `ui_describe_all` to make sure we are on the All Photos tab.
-5. Call `ui_find_element` with `{ "search": ["Search"], "type": "Button" }` to find the Search tab button by its label.
-6. Call `ui_describe_point` to verify the coordinates returned by `ui_find_element` for the Search tab button.
-7. Call `ui_tap` to tap the Search tab button.
-8. Call `ui_tap` to focus on the Search text input.
-9. Call `ui_type` to type "Photos" into the Search text input.
-10. Call `ui_describe_all` to describe the page and find the first photo result.
-11. Call `ui_describe_point` to find the x and y coordinates for the first photo result touchable area.
-12. Call `ui_tap` to tap the coordinates of the first photo result touchable area
-13. Call `ui_swipe` to swipe from the center of the screen down to dismiss the photo and go back to the All Photos tab.
-14. Call `ui_describe_all` to describe the page and see we are the All Photos tab.
-15. Call `screenshot` to take a screenshot of the current page.
-16. Call `ui_view` to view the current page.
-17. Call `stop_recording` to stop the screen recording.
+1. Open the native Photos app in the iOS simulator.
+2. Run `ios-simulator-cli get-booted-sim-id` to get the UDID of the booted simulator.
+3. Run `ios-simulator-cli record-video` to start recording.
+4. Run `ios-simulator-cli ui describe-all` to make sure we are on the All Photos tab.
+5. Run `ios-simulator-cli ui find-element --search "Search" --type Button` to find the Search tab button.
+6. Run `ios-simulator-cli ui describe-point --x <x> --y <y>` using coordinates from the find-element result.
+7. Run `ios-simulator-cli ui tap --x <x> --y <y>` to tap the Search tab button.
+8. Tap the search text input with `ios-simulator-cli ui tap`.
+9. Run `ios-simulator-cli ui type "Photos"`.
+10. Run `ios-simulator-cli ui describe-all` to find the first photo result.
+11. Run `ios-simulator-cli ui describe-point` on the first photo result coordinates.
+12. Run `ios-simulator-cli ui tap` on the first photo result.
+13. Run `ios-simulator-cli ui swipe --x-start 200 --y-start 400 --x-end 200 --y-end 700` to dismiss the photo.
+14. Run `ios-simulator-cli ui describe-all` to confirm we are back on the All Photos tab.
+15. Run `ios-simulator-cli screenshot --output photos-test.png`.
+16. Run `ios-simulator-cli ui view --output photos-view.jpg`.
+17. Run `ios-simulator-cli stop-recording`.

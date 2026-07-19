@@ -1,11 +1,11 @@
-# iOS Simulator MCP - TROUBLESHOOTING
+# iOS Simulator CLI - TROUBLESHOOTING
 
-If you encounter errors or issues using this MCP server, try the following troubleshooting steps before reporting a bug:
+If you encounter errors or issues using this CLI, try the following troubleshooting steps before reporting a bug:
 
 ## 1. Prerequisites
-- **macOS Only:** This server only works on macOS with Xcode and iOS simulators installed.
+- **macOS Only:** This tool only works on macOS with Xcode and iOS simulators installed.
 - **IDB Tool:** Ensure [Facebook IDB](https://fbidb.io/) is installed and available in your PATH.
-- **Node.js:** Make sure Node.js is installed and up to date.
+- **Node.js:** Make sure Node.js is installed and up to date (for npm installs).
 
 ## 2. Installing IDB 
 
@@ -72,17 +72,18 @@ The installation section in [IDB](https://fbidb.io/docs/installation/) is a litt
 ### "idb: command not found" or IDB errors
 - Follow the install steps above for Homebrew + pip or asdf.
 - Ensure `idb` is in your PATH: try running `idb --version` in your terminal.
+- Set a custom path with `IOS_SIMULATOR_CLI_IDB_PATH` if needed.
 
 ### Permission or File Errors
 - Ensure you have permission to write to the output path (e.g., for screenshots or recordings).
 - Try using a path in your home directory or `~/Downloads`.
+- Set `IOS_SIMULATOR_CLI_DEFAULT_OUTPUT_DIR` to a writable directory.
 
 ### Simulator UI Not Responding
 - Restart the simulator and try again.
 - Quit and relaunch Xcode if needed.
-- Prompt AI to check dimensions of the simulator screen and adjust coordinates to it. Screenshots have 3x resolution and this may result in incorrect position of screen presses.
+- Check dimensions of the simulator screen and adjust coordinates accordingly. Screenshots have 3x resolution and this may result in incorrect position of screen presses.
 
 ## 4. Still Stuck?
 - Check the [README](./README.md) for setup and usage instructions.
-- If the problem persists, [open an issue](https://github.com/joshuayoes/ios-simulator-mcp/issues) and include the error message and steps to reproduce.
-
+- If the problem persists, [open an issue](https://github.com/DebugSwift/ios-simulator-cli/issues) and include the error message and steps to reproduce.

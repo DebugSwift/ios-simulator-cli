@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
+import { parseArgs } from "node:util";
 import { z } from "zod";
 import path from "path";
 import os from "os";
 import fs from "fs";
+
+const VERSION = require("../package.json").version as string;
 
 type LaunchArgsInput = {
   udid: string;
@@ -54,22 +55,15 @@ export function buildLaunchArgs({
 
 const execFileAsync = promisify(execFile);
 
-/**
- * Strict UDID/UUID pattern: 8-4-4-4-12 hexadecimal characters (e.g. 37A360EC-75F9-4AEC-8EFA-10F4A58D8CCA)
- */
 const UDID_REGEX =
   /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
 
+const udidSchema = z.string().regex(UDID_REGEX).optional();
+
 const TMP_ROOT_DIR = fs.mkdtempSync(
-  path.join(os.tmpdir(), "ios-simulator-mcp-")
+  path.join(os.tmpdir(), "ios-simulator-cli-")
 );
 
-/**
- * Runs a command with arguments and returns the stdout and stderr
- * @param cmd - The command to run
- * @param args - The arguments to pass to the command
- * @returns The stdout and stderr of the command
- */
 type RunOptions = {
   env?: Record<string, string>;
 };
@@ -92,24 +86,19 @@ async function run(
   };
 }
 
-/**
- * Gets the IDB command path from environment variable or defaults to "idb"
- * @returns The path to the IDB executable
- * @throws Error if custom path is specified but doesn't exist
- */
 function getIdbPath(): string {
-  const customPath = process.env.IOS_SIMULATOR_MCP_IDB_PATH;
+  const customPath =
+    process.env.IOS_SIMULATOR_CLI_IDB_PATH ??
+    process.env.IOS_SIMULATOR_MCP_IDB_PATH;
 
   if (customPath) {
-    // Expand tilde if present
     const expandedPath = customPath.startsWith("~/")
       ? path.join(os.homedir(), customPath.slice(2))
       : customPath;
 
-    // Check if the path exists
     if (!fs.existsSync(expandedPath)) {
       throw new Error(
-        `Custom IDB path specified in IOS_SIMULATOR_MCP_IDB_PATH does not exist: ${expandedPath}`
+        `Custom IDB path specified in IOS_SIMULATOR_CLI_IDB_PATH does not exist: ${expandedPath}`
       );
     }
 
@@ -119,31 +108,9 @@ function getIdbPath(): string {
   return "idb";
 }
 
-/**
- * Runs the idb command with the given arguments
- * @param args - arguments to pass to the idb command
- * @returns The stdout and stderr of the command
- * @see https://fbidb.io/docs/commands for documentation of available idb commands
- */
 async function idb(...args: string[]) {
   return run(getIdbPath(), args);
 }
-
-// Read filtered tools from environment variable
-const FILTERED_TOOLS =
-  process.env.IOS_SIMULATOR_MCP_FILTERED_TOOLS?.split(",").map((tool) =>
-    tool.trim()
-  ) || [];
-
-// Function to check if a tool is filtered
-function isToolFiltered(toolName: string): boolean {
-  return FILTERED_TOOLS.includes(toolName);
-}
-
-const server = new McpServer({
-  name: "ios-simulator",
-  version: require("../package.json").version,
-});
 
 function toError(input: unknown): Error {
   if (input instanceof Error) return input;
@@ -160,11 +127,11 @@ function toError(input: unknown): Error {
 }
 
 function troubleshootingLink(): string {
-  return "[Troubleshooting Guide](https://github.com/joshuayoes/ios-simulator-mcp/blob/main/TROUBLESHOOTING.md) | [Plain Text Guide for LLMs](https://raw.githubusercontent.com/joshuayoes/ios-simulator-mcp/refs/heads/main/TROUBLESHOOTING.md)";
+  return "https://github.com/DebugSwift/ios-simulator-cli/blob/main/TROUBLESHOOTING.md";
 }
 
 function errorWithTroubleshooting(message: string): string {
-  return `${message}\n\nFor help, see the ${troubleshootingLink()}`;
+  return `${message}\n\nFor help, see ${troubleshootingLink()}`;
 }
 
 async function getBootedDevice() {
@@ -172,11 +139,9 @@ async function getBootedDevice() {
 
   if (stderr) throw new Error(stderr);
 
-  // Parse the output to find booted device
   const lines = stdout.split("\n");
   for (const line of lines) {
     if (line.includes("Booted")) {
-      // Extract the UUID - it's inside parentheses
       const match = line.match(/\(([-0-9A-F]+)\)/);
       if (match) {
         const deviceId = match[1];
@@ -195,7 +160,6 @@ async function getBootedDevice() {
 async function getBootedDeviceId(
   deviceId: string | undefined
 ): Promise<string> {
-  // If deviceId not provided, get the currently booted simulator
   let actualDeviceId = deviceId;
   if (!actualDeviceId) {
     const { id } = await getBootedDevice();
@@ -207,631 +171,21 @@ async function getBootedDeviceId(
   return actualDeviceId;
 }
 
-// Register tools only if they're not filtered
-if (!isToolFiltered("get_booted_sim_id")) {
-  server.tool(
-    "get_booted_sim_id",
-    "Get the ID of the currently booted iOS simulator",
-    { title: "Get Booted Simulator ID", readOnlyHint: true, openWorldHint: true },
-    async () => {
-      try {
-        const { id, name } = await getBootedDevice();
-
-        return {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text: `Booted Simulator: "${name}". UUID: "${id}"`,
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
-if (!isToolFiltered("open_simulator")) {
-  server.tool(
-    "open_simulator",
-    "Opens the iOS Simulator application",
-    { title: "Open Simulator", readOnlyHint: false, openWorldHint: true },
-    async () => {
-      try {
-        await run("open", ["-a", "Simulator.app"]);
-
-        return {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text: "Simulator.app opened successfully",
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error opening Simulator.app: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
-if (!isToolFiltered("ui_describe_all")) {
-  server.tool(
-    "ui_describe_all",
-    "Describes accessibility information for the entire screen in the iOS Simulator",
-    {
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-    },
-    { title: "Describe All UI Elements", readOnlyHint: true, openWorldHint: true },
-    async ({ udid }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-
-        const { stdout } = await idb(
-          "ui",
-          "describe-all",
-          "--udid",
-          actualUdid,
-          "--json",
-          "--nested"
-        );
-
-        return {
-          isError: false,
-          content: [{ type: "text", text: stdout }],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error describing all of the ui: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
-if (!isToolFiltered("ui_tap")) {
-  server.tool(
-    "ui_tap",
-    "Tap on the screen in the iOS Simulator",
-    {
-      duration: z
-        .string()
-        .regex(/^\d+(\.\d+)?$/)
-        .optional()
-        .describe("Press duration"),
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-      x: z.number().describe("The x-coordinate"),
-      y: z.number().describe("The x-coordinate"),
-    },
-    { title: "UI Tap", readOnlyHint: false, openWorldHint: true },
-    async ({ duration, udid, x, y }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-
-        const { stderr } = await idb(
-          "ui",
-          "tap",
-          "--udid",
-          actualUdid,
-          ...(duration ? ["--duration", duration] : []),
-          "--json",
-          // When passing user-provided values to a command, it's crucial to use `--`
-          // to separate the command's options from positional arguments.
-          // This prevents the shell from misinterpreting the arguments as options.
-          "--",
-          String(x),
-          String(y)
-        );
-
-        if (stderr) throw new Error(stderr);
-
-        return {
-          isError: false,
-          content: [{ type: "text", text: "Tapped successfully" }],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error tapping on the screen: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
-if (!isToolFiltered("ui_type")) {
-  server.tool(
-    "ui_type",
-    "Input text into the iOS Simulator",
-    {
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-      text: z
-        .string()
-        .max(500)
-        .regex(/^[\x20-\x7E]+$/)
-        .describe("Text to input"),
-    },
-    { title: "UI Type", readOnlyHint: false, openWorldHint: true },
-    async ({ udid, text }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-
-        const { stderr } = await idb(
-          "ui",
-          "text",
-          "--udid",
-          actualUdid,
-          // When passing user-provided values to a command, it's crucial to use `--`
-          // to separate the command's options from positional arguments.
-          // This prevents the shell from misinterpreting the arguments as options.
-          "--",
-          text
-        );
-
-        if (stderr) throw new Error(stderr);
-
-        return {
-          isError: false,
-          content: [{ type: "text", text: "Typed successfully" }],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error typing text into the iOS Simulator: ${
-                  toError(error).message
-                }`
-              ),
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
-if (!isToolFiltered("ui_swipe")) {
-  server.tool(
-    "ui_swipe",
-    "Swipe on the screen in the iOS Simulator",
-    {
-      duration: z
-        .string()
-        .regex(/^\d+(\.\d+)?$/)
-        .optional()
-        .describe("Swipe duration in seconds (e.g., 0.1)"),
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-      x_start: z.number().describe("The starting x-coordinate"),
-      y_start: z.number().describe("The starting y-coordinate"),
-      x_end: z.number().describe("The ending x-coordinate"),
-      y_end: z.number().describe("The ending y-coordinate"),
-      delta: z
-        .number()
-        .optional()
-        .describe("The size of each step in the swipe (default is 1)")
-        .default(1),
-    },
-    { title: "UI Swipe", readOnlyHint: false, openWorldHint: true },
-    async ({ duration, udid, x_start, y_start, x_end, y_end, delta }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-
-        const { stderr } = await idb(
-          "ui",
-          "swipe",
-          "--udid",
-          actualUdid,
-          ...(duration ? ["--duration", duration] : []),
-          ...(delta ? ["--delta", String(delta)] : []),
-          "--json",
-          // When passing user-provided values to a command, it's crucial to use `--`
-          // to separate the command's options from positional arguments.
-          // This prevents the shell from misinterpreting the arguments as options.
-          "--",
-          String(x_start),
-          String(y_start),
-          String(x_end),
-          String(y_end)
-        );
-
-        if (stderr) throw new Error(stderr);
-
-        return {
-          isError: false,
-          content: [{ type: "text", text: "Swiped successfully" }],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error swiping on the screen: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
-if (!isToolFiltered("ui_describe_point")) {
-  server.tool(
-    "ui_describe_point",
-    "Returns the accessibility element at given co-ordinates on the iOS Simulator's screen",
-    {
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-      x: z.number().describe("The x-coordinate"),
-      y: z.number().describe("The y-coordinate"),
-    },
-    { title: "Describe UI Point", readOnlyHint: true, openWorldHint: true },
-    async ({ udid, x, y }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-
-        const { stdout, stderr } = await idb(
-          "ui",
-          "describe-point",
-          "--udid",
-          actualUdid,
-          "--json",
-          // When passing user-provided values to a command, it's crucial to use `--`
-          // to separate the command's options from positional arguments.
-          // This prevents the shell from misinterpreting the arguments as options.
-          "--",
-          String(x),
-          String(y)
-        );
-
-        if (stderr) throw new Error(stderr);
-
-        return {
-          isError: false,
-          content: [{ type: "text", text: stdout }],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error describing point (${x}, ${y}): ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
-if (!isToolFiltered("ui_find_element")) {
-  server.tool(
-    "ui_find_element",
-    "Searches the accessibility tree and returns elements matching the given criteria",
-    {
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-      search: z
-        .array(z.string().min(1))
-        .min(1)
-        .describe(
-          "Array of search strings. An element matches if ANY string matches against its AXLabel or AXUniqueId"
-        ),
-      type: z
-        .string()
-        .optional()
-        .describe(
-          "Filter by element type (e.g. 'Button', 'StaticText', 'Group'). Case-insensitive exact match"
-        ),
-      matchMode: z
-        .enum(["substring", "exact"])
-        .optional()
-        .default("substring")
-        .describe("Match mode for search strings: 'substring' (default) or 'exact'"),
-      caseSensitive: z
-        .boolean()
-        .optional()
-        .default(false)
-        .describe("Whether search matching is case-sensitive (default: false)"),
-    },
-    { title: "Find UI Element", readOnlyHint: true, openWorldHint: true },
-    async ({ search, type, matchMode, caseSensitive, udid }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-
-        const { stdout } = await idb(
-          "ui",
-          "describe-all",
-          "--udid",
-          actualUdid,
-          "--json",
-          "--nested"
-        );
-
-        const uiData = JSON.parse(stdout);
-
-        function matchesSearch(
-          value: string | null,
-          term: string,
-          mode: "substring" | "exact",
-          sensitive: boolean
-        ): boolean {
-          if (value == null) return false;
-          const v = sensitive ? value : value.toLowerCase();
-          const t = sensitive ? term : term.toLowerCase();
-          return mode === "exact" ? v === t : v.includes(t);
-        }
-
-        function findElements(
-          elements: Array<Record<string, unknown>>
-        ): Array<Record<string, unknown>> {
-          const results: Array<Record<string, unknown>> = [];
-
-          for (const element of elements) {
-            const label = element.AXLabel as string | null;
-            const uniqueId = element.AXUniqueId as string | null;
-            const elementType = element.type as string | undefined;
-
-            const matchesAnySearch = search.some(
-              (term) =>
-                matchesSearch(label, term, matchMode, caseSensitive) ||
-                matchesSearch(uniqueId, term, matchMode, caseSensitive)
-            );
-
-            const matchesType =
-              type == null ||
-              (elementType != null &&
-                elementType.toLowerCase() === type.toLowerCase());
-
-            if (matchesAnySearch && matchesType) {
-              results.push(element);
-            }
-
-            const children = element.children as
-              | Array<Record<string, unknown>>
-              | undefined;
-            if (children && children.length > 0) {
-              results.push(...findElements(children));
-            }
-          }
-
-          return results;
-        }
-
-        const results = findElements(uiData);
-
-        return {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(results),
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error finding UI elements: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
-if (!isToolFiltered("ui_view")) {
-  server.tool(
-    "ui_view",
-    "Get the image content of a compressed screenshot of the current simulator view",
-    {
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-    },
-    { title: "View Screenshot", readOnlyHint: true, openWorldHint: true },
-    async ({ udid }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-
-        // Get screen dimensions in points from ui_describe_all
-        const { stdout: uiDescribeOutput } = await idb(
-          "ui",
-          "describe-all",
-          "--udid",
-          actualUdid,
-          "--json",
-          "--nested"
-        );
-
-        let uiData: unknown;
-        try {
-          uiData = JSON.parse(uiDescribeOutput);
-        } catch {
-          throw new Error("Failed to parse screen dimensions: idb returned invalid JSON");
-        }
-        const screenFrame = (uiData as Array<{ frame?: { width: unknown; height: unknown } }>)[0]?.frame;
-        if (
-          !screenFrame ||
-          typeof screenFrame.width !== "number" ||
-          typeof screenFrame.height !== "number" ||
-          screenFrame.width <= 0 ||
-          screenFrame.height <= 0
-        ) {
-          throw new Error("Could not determine valid screen dimensions from idb output");
-        }
-
-        const pointWidth = screenFrame.width;
-        const pointHeight = screenFrame.height;
-
-        // Generate unique file names with timestamp + random suffix to avoid collisions
-        const ts = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const rawPng = path.join(TMP_ROOT_DIR, `ui-view-${ts}-raw.png`);
-        const compressedJpg = path.join(
-          TMP_ROOT_DIR,
-          `ui-view-${ts}-compressed.jpg`
-        );
-
-        // Capture screenshot as PNG
-        await run("xcrun", [
-          "simctl",
-          "io",
-          actualUdid,
-          "screenshot",
-          "--type=png",
-          "--",
-          rawPng,
-        ]);
-
-        // Resize to match point dimensions and compress to JPEG using sips
-        await run("sips", [
-          "-z",
-          String(pointHeight), // height in points
-          String(pointWidth), // width in points
-          "-s",
-          "format",
-          "jpeg",
-          "-s",
-          "formatOptions",
-          "80", // 80% quality
-          rawPng,
-          "--out",
-          compressedJpg,
-        ]);
-
-        // Read and encode the compressed image, then clean up temp files immediately
-        const imageData = fs.readFileSync(compressedJpg);
-        const base64Data = imageData.toString("base64");
-        try {
-          fs.unlinkSync(rawPng);
-          fs.unlinkSync(compressedJpg);
-        } catch {
-          // ignore cleanup errors — they'll be removed on server exit
-        }
-
-        return {
-          isError: false,
-          content: [
-            {
-              type: "image",
-              data: base64Data,
-              mimeType: "image/jpeg",
-            },
-            {
-              type: "text",
-              text: "Screenshot captured",
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error capturing screenshot: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
-    }
-  );
-}
-
 function ensureAbsolutePath(filePath: string): string {
   if (path.isAbsolute(filePath)) {
     return filePath;
   }
 
-  // Handle ~/something paths in the provided filePath
   if (filePath.startsWith("~/")) {
     return path.join(os.homedir(), filePath.slice(2));
   }
 
-  // Determine the default directory from env var or fallback to ~/Downloads
   let defaultDir = path.join(os.homedir(), "Downloads");
-  const customDefaultDir = process.env.IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR;
+  const customDefaultDir =
+    process.env.IOS_SIMULATOR_CLI_DEFAULT_OUTPUT_DIR ??
+    process.env.IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR;
 
   if (customDefaultDir) {
-    // also expand tilde for the custom directory path
     if (customDefaultDir.startsWith("~/")) {
       defaultDir = path.join(os.homedir(), customDefaultDir.slice(2));
     } else {
@@ -839,413 +193,766 @@ function ensureAbsolutePath(filePath: string): string {
     }
   }
 
-  // Join the relative filePath with the resolved default directory
   return path.join(defaultDir, filePath);
 }
 
-if (!isToolFiltered("screenshot")) {
-  server.tool(
+function parseEnvPairs(values: string[] | undefined): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const pair of values ?? []) {
+    const separator = pair.indexOf("=");
+    if (separator <= 0) {
+      throw new Error(
+        `Invalid env pair "${pair}". Expected format KEY=VALUE.`
+      );
+    }
+    env[pair.slice(0, separator)] = pair.slice(separator + 1);
+  }
+  return env;
+}
+
+async function cmdGetBootedSimId() {
+  const { id, name } = await getBootedDevice();
+  console.log(`Booted Simulator: "${name}". UUID: "${id}"`);
+}
+
+async function cmdOpenSimulator() {
+  await run("open", ["-a", "Simulator.app"]);
+  console.log("Simulator.app opened successfully");
+}
+
+async function cmdUiDescribeAll(udid?: string) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(udid));
+  const { stdout } = await idb(
+    "ui",
+    "describe-all",
+    "--udid",
+    actualUdid,
+    "--json",
+    "--nested"
+  );
+  console.log(stdout);
+}
+
+async function cmdUiTap(options: {
+  udid?: string;
+  x: number;
+  y: number;
+  duration?: string;
+}) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(options.udid));
+  const { stderr } = await idb(
+    "ui",
+    "tap",
+    "--udid",
+    actualUdid,
+    ...(options.duration ? ["--duration", options.duration] : []),
+    "--json",
+    "--",
+    String(options.x),
+    String(options.y)
+  );
+
+  if (stderr) throw new Error(stderr);
+  console.log("Tapped successfully");
+}
+
+async function cmdUiType(text: string, udid?: string) {
+  z.string().max(500).regex(/^[\x20-\x7E]+$/).parse(text);
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(udid));
+  const { stderr } = await idb(
+    "ui",
+    "text",
+    "--udid",
+    actualUdid,
+    "--",
+    text
+  );
+
+  if (stderr) throw new Error(stderr);
+  console.log("Typed successfully");
+}
+
+async function cmdUiSwipe(options: {
+  udid?: string;
+  xStart: number;
+  yStart: number;
+  xEnd: number;
+  yEnd: number;
+  duration?: string;
+  delta?: number;
+}) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(options.udid));
+  const { stderr } = await idb(
+    "ui",
+    "swipe",
+    "--udid",
+    actualUdid,
+    ...(options.duration ? ["--duration", options.duration] : []),
+    ...(options.delta != null ? ["--delta", String(options.delta)] : []),
+    "--json",
+    "--",
+    String(options.xStart),
+    String(options.yStart),
+    String(options.xEnd),
+    String(options.yEnd)
+  );
+
+  if (stderr) throw new Error(stderr);
+  console.log("Swiped successfully");
+}
+
+async function cmdUiDescribePoint(options: {
+  udid?: string;
+  x: number;
+  y: number;
+}) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(options.udid));
+  const { stdout, stderr } = await idb(
+    "ui",
+    "describe-point",
+    "--udid",
+    actualUdid,
+    "--json",
+    "--",
+    String(options.x),
+    String(options.y)
+  );
+
+  if (stderr) throw new Error(stderr);
+  console.log(stdout);
+}
+
+async function cmdUiFindElement(options: {
+  udid?: string;
+  search: string[];
+  type?: string;
+  matchMode: "substring" | "exact";
+  caseSensitive: boolean;
+}) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(options.udid));
+  const { stdout } = await idb(
+    "ui",
+    "describe-all",
+    "--udid",
+    actualUdid,
+    "--json",
+    "--nested"
+  );
+
+  const uiData = JSON.parse(stdout);
+
+  function matchesSearch(
+    value: string | null,
+    term: string,
+    mode: "substring" | "exact",
+    sensitive: boolean
+  ): boolean {
+    if (value == null) return false;
+    const v = sensitive ? value : value.toLowerCase();
+    const t = sensitive ? term : term.toLowerCase();
+    return mode === "exact" ? v === t : v.includes(t);
+  }
+
+  function findElements(
+    elements: Array<Record<string, unknown>>
+  ): Array<Record<string, unknown>> {
+    const results: Array<Record<string, unknown>> = [];
+
+    for (const element of elements) {
+      const label = element.AXLabel as string | null;
+      const uniqueId = element.AXUniqueId as string | null;
+      const elementType = element.type as string | undefined;
+
+      const matchesAnySearch = options.search.some(
+        (term) =>
+          matchesSearch(label, term, options.matchMode, options.caseSensitive) ||
+          matchesSearch(
+            uniqueId,
+            term,
+            options.matchMode,
+            options.caseSensitive
+          )
+      );
+
+      const matchesType =
+        options.type == null ||
+        (elementType != null &&
+          elementType.toLowerCase() === options.type.toLowerCase());
+
+      if (matchesAnySearch && matchesType) {
+        results.push(element);
+      }
+
+      const children = element.children as
+        | Array<Record<string, unknown>>
+        | undefined;
+      if (children && children.length > 0) {
+        results.push(...findElements(children));
+      }
+    }
+
+    return results;
+  }
+
+  console.log(JSON.stringify(findElements(uiData)));
+}
+
+async function cmdUiView(options: { udid?: string; output?: string }) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(options.udid));
+
+  const { stdout: uiDescribeOutput } = await idb(
+    "ui",
+    "describe-all",
+    "--udid",
+    actualUdid,
+    "--json",
+    "--nested"
+  );
+
+  let uiData: unknown;
+  try {
+    uiData = JSON.parse(uiDescribeOutput);
+  } catch {
+    throw new Error(
+      "Failed to parse screen dimensions: idb returned invalid JSON"
+    );
+  }
+
+  const screenFrame = (
+    uiData as Array<{ frame?: { width: unknown; height: unknown } }>
+  )[0]?.frame;
+  if (
+    !screenFrame ||
+    typeof screenFrame.width !== "number" ||
+    typeof screenFrame.height !== "number" ||
+    screenFrame.width <= 0 ||
+    screenFrame.height <= 0
+  ) {
+    throw new Error(
+      "Could not determine valid screen dimensions from idb output"
+    );
+  }
+
+  const ts = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const rawPng = path.join(TMP_ROOT_DIR, `ui-view-${ts}-raw.png`);
+  const compressedJpg = path.join(
+    TMP_ROOT_DIR,
+    `ui-view-${ts}-compressed.jpg`
+  );
+
+  await run("xcrun", [
+    "simctl",
+    "io",
+    actualUdid,
     "screenshot",
-    "Takes a screenshot of the iOS Simulator",
-    {
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-      output_path: z
-        .string()
-        .max(1024)
-        .describe(
-          "File path where the screenshot will be saved. If relative, it uses the directory specified by the `IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR` env var, or `~/Downloads` if not set."
-        ),
-      type: z
-        .enum(["png", "tiff", "bmp", "gif", "jpeg"])
-        .optional()
-        .describe(
-          "Image format (png, tiff, bmp, gif, or jpeg). Default is png."
-        ),
-      display: z
-        .enum(["internal", "external"])
-        .optional()
-        .describe(
-          "Display to capture (internal or external). Default depends on device type."
-        ),
-      mask: z
-        .enum(["ignored", "alpha", "black"])
-        .optional()
-        .describe(
-          "For non-rectangular displays, handle the mask by policy (ignored, alpha, or black)"
-        ),
-    },
-    { title: "Take Screenshot", readOnlyHint: false, openWorldHint: true },
-    async ({ udid, output_path, type, display, mask }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-        const absolutePath = ensureAbsolutePath(output_path);
+    "--type=png",
+    "--",
+    rawPng,
+  ]);
 
-        // command is weird, it responds with stderr on success and stdout is blank
-        const { stderr: stdout } = await run("xcrun", [
-          "simctl",
-          "io",
-          actualUdid,
-          "screenshot",
-          ...(type ? [`--type=${type}`] : []),
-          ...(display ? [`--display=${display}`] : []),
-          ...(mask ? [`--mask=${mask}`] : []),
-          // When passing user-provided values to a command, it's crucial to use `--`
-          // to separate the command's options from positional arguments.
-          // This prevents the shell from misinterpreting the arguments as options.
-          "--",
-          absolutePath,
-        ]);
+  await run("sips", [
+    "-z",
+    String(screenFrame.height),
+    String(screenFrame.width),
+    "-s",
+    "format",
+    "jpeg",
+    "-s",
+    "formatOptions",
+    "80",
+    rawPng,
+    "--out",
+    compressedJpg,
+  ]);
 
-        // throw if we don't get the expected success message
-        if (stdout && !stdout.includes("Wrote screenshot to")) {
-          throw new Error(stdout);
+  if (options.output) {
+    const outputPath = ensureAbsolutePath(options.output);
+    fs.copyFileSync(compressedJpg, outputPath);
+    console.log(`Screenshot saved to ${outputPath}`);
+  } else {
+    const base64Data = fs.readFileSync(compressedJpg).toString("base64");
+    console.log(base64Data);
+  }
+
+  try {
+    fs.unlinkSync(rawPng);
+    fs.unlinkSync(compressedJpg);
+  } catch {
+    // ignore cleanup errors
+  }
+}
+
+async function cmdScreenshot(options: {
+  udid?: string;
+  outputPath: string;
+  type?: "png" | "tiff" | "bmp" | "gif" | "jpeg";
+  display?: "internal" | "external";
+  mask?: "ignored" | "alpha" | "black";
+}) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(options.udid));
+  const absolutePath = ensureAbsolutePath(options.outputPath);
+
+  const { stderr: stdout } = await run("xcrun", [
+    "simctl",
+    "io",
+    actualUdid,
+    "screenshot",
+    ...(options.type ? [`--type=${options.type}`] : []),
+    ...(options.display ? [`--display=${options.display}`] : []),
+    ...(options.mask ? [`--mask=${options.mask}`] : []),
+    "--",
+    absolutePath,
+  ]);
+
+  if (stdout && !stdout.includes("Wrote screenshot to")) {
+    throw new Error(stdout);
+  }
+
+  console.log(stdout || `Screenshot saved to ${absolutePath}`);
+}
+
+async function cmdRecordVideo(options: {
+  udid?: string;
+  outputPath?: string;
+  codec?: "h264" | "hevc";
+  display?: "internal" | "external";
+  mask?: "ignored" | "alpha" | "black";
+  force?: boolean;
+}) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(options.udid));
+  const defaultFileName = `simulator_recording_${Date.now()}.mp4`;
+  const outputFile = ensureAbsolutePath(options.outputPath ?? defaultFileName);
+
+  const recordingProcess = spawn("xcrun", [
+    "simctl",
+    "io",
+    actualUdid,
+    "recordVideo",
+    ...(options.codec ? [`--codec=${options.codec}`] : []),
+    ...(options.display ? [`--display=${options.display}`] : []),
+    ...(options.mask ? [`--mask=${options.mask}`] : []),
+    ...(options.force ? ["--force"] : []),
+    "--",
+    outputFile,
+  ]);
+
+  await new Promise((resolve, reject) => {
+    let errorOutput = "";
+    let resolved = false;
+
+    recordingProcess.stderr.on("data", (data) => {
+      const message = data.toString();
+      if (message.includes("Recording started")) {
+        resolved = true;
+        resolve(true);
+      } else {
+        errorOutput += message;
+      }
+    });
+
+    recordingProcess.on("exit", (code) => {
+      if (!resolved) {
+        reject(
+          new Error(
+            errorOutput.trim() ||
+              `Recording process exited early with code ${code}`
+          )
+        );
+      }
+    });
+
+    setTimeout(() => {
+      if (!resolved) {
+        if (recordingProcess.killed || recordingProcess.exitCode !== null) {
+          reject(
+            new Error(
+              errorOutput.trim() ||
+                "Recording process terminated unexpectedly"
+            )
+          );
+        } else {
+          resolve(true);
         }
-
-        return {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text: stdout,
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error taking screenshot: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
       }
-    }
+    }, 5000);
+  });
+
+  console.log(
+    `Recording started. The video will be saved to: ${outputFile}\nTo stop recording, run: ios-simulator-cli stop-recording`
   );
 }
 
-if (!isToolFiltered("record_video")) {
-  server.tool(
-    "record_video",
-    "Records a video of the iOS Simulator using simctl directly",
-    {
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-      output_path: z
-        .string()
-        .max(1024)
-        .optional()
-        .describe(
-          `Optional output path. If not provided, a default name will be used. The file will be saved in the directory specified by \`IOS_SIMULATOR_MCP_DEFAULT_OUTPUT_DIR\` or in \`~/Downloads\` if the environment variable is not set.`
-        ),
-      codec: z
-        .enum(["h264", "hevc"])
-        .optional()
-        .describe(
-          'Specifies the codec type: "h264" or "hevc". Default is "hevc".'
-        ),
-      display: z
-        .enum(["internal", "external"])
-        .optional()
-        .describe(
-          'Display to capture: "internal" or "external". Default depends on device type.'
-        ),
-      mask: z
-        .enum(["ignored", "alpha", "black"])
-        .optional()
-        .describe(
-          'For non-rectangular displays, handle the mask by policy: "ignored", "alpha", or "black".'
-        ),
-      force: z
-        .boolean()
-        .optional()
-        .describe(
-          "Force the output file to be written to, even if the file already exists."
-        ),
-    },
-    { title: "Record Video", readOnlyHint: false, openWorldHint: true },
-    async ({ udid, output_path, codec, display, mask, force }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-        const defaultFileName = `simulator_recording_${Date.now()}.mp4`;
-        const outputFile = ensureAbsolutePath(output_path ?? defaultFileName);
+async function cmdStopRecording() {
+  await run("pkill", ["-SIGINT", "-f", "simctl.*recordVideo"]);
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  console.log("Recording stopped successfully.");
+}
 
-        // Start the recording process
-        const recordingProcess = spawn("xcrun", [
-          "simctl",
-          "io",
-          actualUdid,
-          "recordVideo",
-          ...(codec ? [`--codec=${codec}`] : []),
-          ...(display ? [`--display=${display}`] : []),
-          ...(mask ? [`--mask=${mask}`] : []),
-          ...(force ? ["--force"] : []),
-          // When passing user-provided values to a command, it's crucial to use `--`
-          // to separate the command's options from positional arguments.
-          // This prevents the shell from misinterpreting the arguments as options.
-          "--",
-          outputFile,
-        ]);
+async function cmdInstallApp(appPath: string, udid?: string) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(udid));
+  const absolutePath = path.isAbsolute(appPath)
+    ? appPath
+    : path.resolve(appPath);
 
-        // Wait for recording to start or fail within 5 seconds
-        await new Promise((resolve, reject) => {
-          let errorOutput = "";
-          let resolved = false;
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error(`App bundle not found at: ${absolutePath}`);
+  }
 
-          recordingProcess.stderr.on("data", (data) => {
-            const message = data.toString();
-            if (message.includes("Recording started")) {
-              resolved = true;
-              resolve(true);
-            } else {
-              errorOutput += message;
-            }
-          });
+  await run("xcrun", ["simctl", "install", actualUdid, absolutePath]);
+  console.log(`App installed successfully from: ${absolutePath}`);
+}
 
-          recordingProcess.on("exit", (code) => {
-            if (!resolved) {
-              reject(new Error(
-                errorOutput.trim() || `Recording process exited early with code ${code}`
-              ));
-            }
-          });
+async function cmdLaunchApp(options: {
+  udid?: string;
+  bundleId: string;
+  terminateRunning?: boolean;
+  env?: Record<string, string>;
+}) {
+  const actualUdid = await getBootedDeviceId(udidSchema.parse(options.udid));
 
-          setTimeout(() => {
-            if (!resolved) {
-              if (recordingProcess.killed || recordingProcess.exitCode !== null) {
-                reject(new Error(errorOutput.trim() || "Recording process terminated unexpectedly"));
-              } else {
-                // Process still running but no "Recording started" message — assume it started
-                resolve(true);
-              }
-            }
-          }, 5000);
-        });
+  const { args, env: simctlEnv } = buildLaunchArgs({
+    udid: actualUdid,
+    bundleId: options.bundleId,
+    terminateRunning: options.terminateRunning,
+    env: options.env,
+  });
 
-        return {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text: `Recording started. The video will be saved to: ${outputFile}\nTo stop recording, use the stop_recording command.`,
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error starting recording: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
-    }
+  const { stdout } = await run("xcrun", ["simctl", ...args], {
+    env: simctlEnv,
+  });
+
+  const pidMatch = stdout.match(/^(\d+)/);
+  const pid = pidMatch ? pidMatch[1] : null;
+
+  console.log(
+    pid
+      ? `App ${options.bundleId} launched successfully with PID: ${pid}`
+      : `App ${options.bundleId} launched successfully`
   );
 }
 
-if (!isToolFiltered("stop_recording")) {
-  server.tool(
-    "stop_recording",
-    "Stops the simulator video recording using killall",
-    {},
-    { title: "Stop Recording", readOnlyHint: false, openWorldHint: true },
-    async () => {
-      try {
-        await run("pkill", ["-SIGINT", "-f", "simctl.*recordVideo"]);
+function printHelp() {
+  console.log(`ios-simulator-cli v${VERSION}
 
-        // Wait a moment for the video to finalize
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+A command-line tool for interacting with iOS simulators.
 
-        return {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text: "Recording stopped successfully.",
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error stopping recording: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
-      }
+Usage:
+  ios-simulator-cli <command> [options]
+
+Commands:
+  get-booted-sim-id                     Get the booted simulator UUID
+  open                                  Open Simulator.app
+  ui describe-all [--udid <uuid>]       Describe all UI elements
+  ui tap --x <n> --y <n> [--duration <s>] [--udid <uuid>]
+  ui type <text> [--udid <uuid>]        Type text into the simulator
+  ui swipe --x-start <n> --y-start <n> --x-end <n> --y-end <n> [--duration <s>] [--delta <n>] [--udid <uuid>]
+  ui describe-point --x <n> --y <n> [--udid <uuid>]
+  ui find-element --search <term> [--search <term>] [--type <type>] [--match-mode substring|exact] [--case-sensitive] [--udid <uuid>]
+  ui view [--output <path>] [--udid <uuid>]
+  screenshot --output <path> [--type png|jpeg|...] [--display internal|external] [--mask ignored|alpha|black] [--udid <uuid>]
+  record-video [--output <path>] [--codec h264|hevc] [--display internal|external] [--mask ignored|alpha|black] [--force] [--udid <uuid>]
+  stop-recording                        Stop an active simulator recording
+  install-app --app-path <path> [--udid <uuid>]
+  launch-app --bundle-id <id> [--terminate-running] [--env KEY=VALUE] [--udid <uuid>]
+
+Global options:
+  -h, --help                            Show this help
+  -v, --version                         Show version
+
+Environment variables:
+  IOS_SIMULATOR_CLI_DEFAULT_OUTPUT_DIR  Default directory for relative output paths (default: ~/Downloads)
+  IOS_SIMULATOR_CLI_IDB_PATH            Custom path to the idb executable
+
+Examples:
+  ios-simulator-cli get-booted-sim-id
+  ios-simulator-cli ui tap --x 200 --y 400
+  ios-simulator-cli screenshot --output home.png
+  ios-simulator-cli launch-app --bundle-id com.apple.mobilesafari
+`);
+}
+
+async function handleUiCommand(args: string[]) {
+  const subcommand = args[0];
+  const rest = args.slice(1);
+
+  switch (subcommand) {
+    case "describe-all": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { udid: { type: "string" } },
+        allowPositionals: false,
+      });
+      await cmdUiDescribeAll(values.udid);
+      return;
     }
-  );
-}
-
-if (!isToolFiltered("install_app")) {
-  server.tool(
-    "install_app",
-    "Installs an app bundle (.app or .ipa) on the iOS Simulator",
-    {
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-      app_path: z
-        .string()
-        .max(1024)
-        .describe(
-          "Path to the app bundle (.app directory or .ipa file) to install"
-        ),
-    },
-    { title: "Install App", readOnlyHint: false, openWorldHint: true },
-    async ({ udid, app_path }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-        const absolutePath = path.isAbsolute(app_path)
-          ? app_path
-          : path.resolve(app_path);
-
-        // Check if the app bundle exists
-        if (!fs.existsSync(absolutePath)) {
-          throw new Error(`App bundle not found at: ${absolutePath}`);
-        }
-
-        // run() will throw if the command fails (non-zero exit code)
-        await run("xcrun", ["simctl", "install", actualUdid, absolutePath]);
-
-        return {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text: `App installed successfully from: ${absolutePath}`,
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error installing app: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
+    case "tap": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          udid: { type: "string" },
+          x: { type: "string" },
+          y: { type: "string" },
+          duration: { type: "string" },
+        },
+        allowPositionals: false,
+      });
+      if (!values.x || !values.y) {
+        throw new Error("ui tap requires --x and --y");
       }
-    }
-  );
-}
-
-if (!isToolFiltered("launch_app")) {
-  server.tool(
-    "launch_app",
-    "Launches an app on the iOS Simulator by bundle identifier",
-    {
-      udid: z
-        .string()
-        .regex(UDID_REGEX)
-        .optional()
-        .describe("Udid of target, can also be set with the IDB_UDID env var"),
-      bundle_id: z
-        .string()
-        .max(256)
-        .describe(
-          "Bundle identifier of the app to launch (e.g., com.apple.mobilesafari)"
-        ),
-      terminate_running: z
-        .boolean()
-        .optional()
-        .describe(
-          "Terminate the app if it is already running before launching"
-        ),
-      env: z
-        .record(z.string())
-        .optional()
-        .describe("Environment variables to pass to simctl launch"),
-    },
-    { title: "Launch App", readOnlyHint: false, openWorldHint: true },
-    async ({ udid, bundle_id, terminate_running, env }) => {
-      try {
-        const actualUdid = await getBootedDeviceId(udid);
-
-        const { args, env: simctlEnv } = buildLaunchArgs({
-          udid: actualUdid,
-          bundleId: bundle_id,
-          terminateRunning: terminate_running,
-          env,
-        });
-
-        // run() will throw if the command fails (non-zero exit code)
-        const { stdout } = await run("xcrun", ["simctl", ...args], {
-          env: simctlEnv,
-        });
-
-        // Extract PID from output if available
-        // simctl launch outputs the PID as the first token in stdout
-        const pidMatch = stdout.match(/^(\d+)/);
-        const pid = pidMatch ? pidMatch[1] : null;
-
-        return {
-          isError: false,
-          content: [
-            {
-              type: "text",
-              text: pid
-                ? `App ${bundle_id} launched successfully with PID: ${pid}`
-                : `App ${bundle_id} launched successfully`,
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: errorWithTroubleshooting(
-                `Error launching app: ${toError(error).message}`
-              ),
-            },
-          ],
-        };
+      if (values.duration) {
+        z.string().regex(/^\d+(\.\d+)?$/).parse(values.duration);
       }
+      await cmdUiTap({
+        udid: values.udid,
+        x: Number(values.x),
+        y: Number(values.y),
+        duration: values.duration,
+      });
+      return;
     }
-  );
+    case "type": {
+      const { values, positionals } = parseArgs({
+        args: rest,
+        options: { udid: { type: "string" } },
+        allowPositionals: true,
+      });
+      const text = positionals.join(" ");
+      if (!text) {
+        throw new Error("ui type requires text");
+      }
+      await cmdUiType(text, values.udid);
+      return;
+    }
+    case "swipe": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          udid: { type: "string" },
+          "x-start": { type: "string" },
+          "y-start": { type: "string" },
+          "x-end": { type: "string" },
+          "y-end": { type: "string" },
+          duration: { type: "string" },
+          delta: { type: "string" },
+        },
+        allowPositionals: false,
+      });
+      if (!values["x-start"] || !values["y-start"] || !values["x-end"] || !values["y-end"]) {
+        throw new Error(
+          "ui swipe requires --x-start, --y-start, --x-end, and --y-end"
+        );
+      }
+      await cmdUiSwipe({
+        udid: values.udid,
+        xStart: Number(values["x-start"]),
+        yStart: Number(values["y-start"]),
+        xEnd: Number(values["x-end"]),
+        yEnd: Number(values["y-end"]),
+        duration: values.duration,
+        delta: values.delta ? Number(values.delta) : undefined,
+      });
+      return;
+    }
+    case "describe-point": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          udid: { type: "string" },
+          x: { type: "string" },
+          y: { type: "string" },
+        },
+        allowPositionals: false,
+      });
+      if (!values.x || !values.y) {
+        throw new Error("ui describe-point requires --x and --y");
+      }
+      await cmdUiDescribePoint({
+        udid: values.udid,
+        x: Number(values.x),
+        y: Number(values.y),
+      });
+      return;
+    }
+    case "find-element": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          udid: { type: "string" },
+          search: { type: "string", multiple: true },
+          type: { type: "string" },
+          "match-mode": { type: "string" },
+          "case-sensitive": { type: "boolean", default: false },
+        },
+        allowPositionals: false,
+      });
+      if (!values.search || values.search.length === 0) {
+        throw new Error("ui find-element requires at least one --search value");
+      }
+      const matchMode = z.enum(["substring", "exact"]).parse(
+        values["match-mode"] ?? "substring"
+      );
+      await cmdUiFindElement({
+        udid: values.udid,
+        search: values.search,
+        type: values.type,
+        matchMode,
+        caseSensitive: values["case-sensitive"] ?? false,
+      });
+      return;
+    }
+    case "view": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          udid: { type: "string" },
+          output: { type: "string" },
+        },
+        allowPositionals: false,
+      });
+      await cmdUiView({ udid: values.udid, output: values.output });
+      return;
+    }
+    default:
+      throw new Error(
+        `Unknown ui subcommand: ${subcommand ?? "(none)"}. Run ios-simulator-cli --help for usage.`
+      );
+  }
 }
 
-async function runServer() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+async function main() {
+  const args = process.argv.slice(2);
+
+  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
+    printHelp();
+    return;
+  }
+
+  if (args.includes("--version") || args.includes("-v")) {
+    console.log(VERSION);
+    return;
+  }
+
+  const command = args[0];
+  const rest = args.slice(1);
+
+  switch (command) {
+    case "get-booted-sim-id":
+      await cmdGetBootedSimId();
+      return;
+    case "open":
+      await cmdOpenSimulator();
+      return;
+    case "ui":
+      await handleUiCommand(rest);
+      return;
+    case "screenshot": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          udid: { type: "string" },
+          output: { type: "string" },
+          type: { type: "string" },
+          display: { type: "string" },
+          mask: { type: "string" },
+        },
+        allowPositionals: false,
+      });
+      if (!values.output) {
+        throw new Error("screenshot requires --output");
+      }
+      await cmdScreenshot({
+        udid: values.udid,
+        outputPath: values.output,
+        type: z
+          .enum(["png", "tiff", "bmp", "gif", "jpeg"])
+          .optional()
+          .parse(values.type),
+        display: z.enum(["internal", "external"]).optional().parse(values.display),
+        mask: z.enum(["ignored", "alpha", "black"]).optional().parse(values.mask),
+      });
+      return;
+    }
+    case "record-video": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          udid: { type: "string" },
+          output: { type: "string" },
+          codec: { type: "string" },
+          display: { type: "string" },
+          mask: { type: "string" },
+          force: { type: "boolean", default: false },
+        },
+        allowPositionals: false,
+      });
+      await cmdRecordVideo({
+        udid: values.udid,
+        outputPath: values.output,
+        codec: z.enum(["h264", "hevc"]).optional().parse(values.codec),
+        display: z.enum(["internal", "external"]).optional().parse(values.display),
+        mask: z.enum(["ignored", "alpha", "black"]).optional().parse(values.mask),
+        force: values.force,
+      });
+      return;
+    }
+    case "stop-recording":
+      await cmdStopRecording();
+      return;
+    case "install-app": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          udid: { type: "string" },
+          "app-path": { type: "string" },
+        },
+        allowPositionals: false,
+      });
+      if (!values["app-path"]) {
+        throw new Error("install-app requires --app-path");
+      }
+      await cmdInstallApp(values["app-path"], values.udid);
+      return;
+    }
+    case "launch-app": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          udid: { type: "string" },
+          "bundle-id": { type: "string" },
+          "terminate-running": { type: "boolean", default: false },
+          env: { type: "string", multiple: true },
+        },
+        allowPositionals: false,
+      });
+      if (!values["bundle-id"]) {
+        throw new Error("launch-app requires --bundle-id");
+      }
+      await cmdLaunchApp({
+        udid: values.udid,
+        bundleId: values["bundle-id"],
+        terminateRunning: values["terminate-running"],
+        env: parseEnvPairs(values.env),
+      });
+      return;
+    }
+    default:
+      throw new Error(
+        `Unknown command: ${command}. Run ios-simulator-cli --help for usage.`
+      );
+  }
 }
 
-runServer().catch(console.error);
-
-process.stdin.on("close", () => {
-  console.log("iOS Simulator MCP Server closed");
-  server.close();
+function cleanup() {
   try {
     fs.rmSync(TMP_ROOT_DIR, { recursive: true, force: true });
-  } catch (error) {
-    // Ignore cleanup errors
+  } catch {
+    // ignore cleanup errors
   }
-});
+}
+
+main()
+  .catch((error) => {
+    console.error(errorWithTroubleshooting(`Error: ${toError(error).message}`));
+    process.exitCode = 1;
+  })
+  .finally(cleanup);
