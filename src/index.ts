@@ -1305,7 +1305,8 @@ async function main() {
         allowPositionals: false,
       });
       if (!values.config) {
-        throw new Error("run requires --config <path>");
+        printRunHelp();
+        return;
       }
       await cmdRun(values.config);
       return;
