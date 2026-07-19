@@ -10,14 +10,17 @@ A command-line tool for interacting with iOS simulators. Control UI, capture scr
 
 ### Homebrew (recommended)
 
+The formula lives in this repo, so tap it explicitly (Homebrew otherwise looks for a separate `homebrew-ios-simulator-cli` repo that does not exist):
+
 ```bash
-brew install DebugSwift/ios-simulator-cli/ios-simulator-cli
+brew tap DebugSwift/ios-simulator-cli https://github.com/DebugSwift/ios-simulator-cli
+brew install ios-simulator-cli
 ```
 
 To install the latest from `main`:
 
 ```bash
-brew install --HEAD DebugSwift/ios-simulator-cli/ios-simulator-cli
+brew install --HEAD ios-simulator-cli
 ```
 
 ### npm
